@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <execution>
 #include <iostream>
+#include <limits>
 
 // Algorithm due to Piotr Kowalczyk,
 // "Global Complex Roots and Poles Finding Algorithm Based on Phase Analysis
@@ -62,7 +63,8 @@ namespace zf
 	template <typename T>
 	class Triangle;
 
-	enum Direction
+	// Directions radiating hexagonally from a node.
+	enum class Direction
 	{
 		right = 0,
 		up_right,
@@ -72,10 +74,11 @@ namespace zf
 		down_right,
 	};
 
+	// Left or right side of an edge
 	enum class Side
 	{
-		right = true,
-		left = false
+		left = false,
+		right = true
 	};
 
 	// c++'s built-in mod operator actually gives division-remainder.
@@ -179,7 +182,21 @@ namespace zf
 	private:
 		Edge<T>* edges[3];
 	};
-
+};
+namespace std
+{
+	typedef std::pair<int64_t, int64_t> key;
+	template <>
+	class hash<key> {
+	public:
+		size_t operator()(const key& name) const
+		{
+			return hash<int64_t>()(name.first) ^ hash<int64_t>()(name.second);
+		}
+	};
+};
+namespace zf
+{
 	template <typename T>
 	class Mesh
 	{
@@ -239,9 +256,10 @@ namespace zf
 		// remain.
 		void cull_edges();
 
-		uint64_t gen_key(cplx z);
+		std::pair<int64_t, int64_t> gen_key(cplx z);
 	private:
-		std::unordered_map<uint64_t, std::unique_ptr<Node<T>>> nodes;
+		std::unordered_map<std::pair<int64_t, int64_t>,
+			std::unique_ptr<Node<T>>> nodes;
 		std::vector<std::unique_ptr<Edge<T>>> edges;
 		std::vector<std::unique_ptr<Triangle<T>>> triangles;
 
@@ -305,7 +323,7 @@ namespace zf
 		{
 			connect(nodes[gen_key(cplx(loc_x, loc_y))].get(),
 				nodes[gen_key(cplx(loc_x + edge_width, loc_y))].get(),
-				Direction::right);
+				(int)Direction::right);
 		};
 
 		auto connect_DL = [=](T loc_x, T loc_y)
@@ -313,7 +331,7 @@ namespace zf
 			connect(nodes[gen_key(cplx(loc_x, loc_y))].get(),
 				nodes[gen_key(cplx(loc_x - half_edge_width,
 					loc_y - row_width))].get(),
-				Direction::down_left);
+				(int)Direction::down_left);
 		};
 
 		auto connect_DR = [=](T loc_x, T loc_y)
@@ -321,7 +339,7 @@ namespace zf
 			connect(nodes[gen_key(cplx(loc_x, loc_y))].get(),
 				nodes[gen_key(cplx(loc_x + half_edge_width,
 					loc_y - row_width))].get(),
-				Direction::down_right);
+				(int)Direction::down_right);
 		};
 
 		// Nodes are connected in an equilateral triangular grid, with the bases
@@ -557,7 +575,7 @@ namespace zf
 				std::function<void(Triangle<T>*)> next_tri =
 					[&](Triangle<T>* tri)
 				{
-					if (tri && tri->is_external() && !tri->visited)
+					if (tri && !tri->visited)
 					{
 						tri->visited = true;
 						tri->make_CCW();
@@ -584,6 +602,7 @@ namespace zf
 						/ (cplx)(boundarysize * 2), sum_dq / 4));
 				}
 			});
+
 		return points;
 	}
 
@@ -785,17 +804,11 @@ namespace zf
 	}
 
 	template<typename T>
-	inline uint64_t Mesh<T>::gen_key(cplx z)
+	inline std::pair<int64_t, int64_t> Mesh<T>::gen_key(cplx z)
 	{
-		union Key
-		{
-			int32_t a[2];
-			uint64_t b;
-		};
-		Key res;
-		res.a[0] = z.real() / precision * 100 + 0.5;
-		res.a[1] = z.imag() / precision * 100 + 0.5;
-		return res.b;
+		int64_t a = z.real() / precision * 100 + 0.5;
+		int64_t b = z.imag() / precision * 100 + 0.5;
+		return std::make_pair(a, b);
 	}
 
 	template<typename T>
