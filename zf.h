@@ -929,7 +929,7 @@ namespace zf
 			std::function<std::complex<T>(std::complex<T>)> f,
 			bool return_0_order, T initial_mesh_len)
 	{
-		// Arbitrary. Later will add a trial-and error mesh sizer which tests
+		// Arbitrary. Later could add a trial-and error mesh sizer which tests
 		// a few values in the desired neighborhood and picks the one which
 		// finds the most candidate regions.
 		if (initial_mesh_len < 0)
