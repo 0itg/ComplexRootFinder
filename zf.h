@@ -345,15 +345,13 @@ namespace zf
 		// Nodes are connected in an equilateral triangular grid, with the bases
 		// aligned with the horizontal axis.
 
-		// TODO: Simplify this, now that structure has changed.
-
 		//  <----------->   Repeat as necessary
 		//   ----- ----- $ 
 		//  / \   / \   $   <--- Even rows
 		// /   \ /   \ $
-		// ~~~~~ +++++ #
-		//  ~   + +   # #   <--- Odd rows
-		//   ~ +   + #   #
+		// ~~~~~ ----- #
+		//  ~   / \   # #   <--- Odd rows
+		//   ~ /   \ #   #
 		//     ***** *****  <--- Last row
 		//      <->   Repeat as necessary
 		int x, y;
@@ -368,49 +366,34 @@ namespace zf
 				//  ~~~~~
 				//   ~
 				//    ~ 
-
 				connect_R(loc_x, loc_y);
 				connect_DR(loc_x, loc_y);
 				x++;
 				loc_x += edge_width;
-				for (x; x < col_count - 1; x++)
-				{
-					//   +++++
-					//  + +
-					// +   + 
-
-					connect_R(loc_x, loc_y);
-					connect_DL(loc_x, loc_y);
-					connect_DR(loc_x, loc_y);
-					loc_x += edge_width;
-				}
-
+			}
+			for (x; x < col_count - 1; x++)
+			{
+				//   -----
+				//  / \
+				// /   \ 
+				connect_R(loc_x, loc_y);
+				connect_DL(loc_x, loc_y);
+				connect_DR(loc_x, loc_y);
+				loc_x += edge_width;
+			}
+			if (y % 2)
+			{
 				//   #
 				//  # #
 				// #   #
-
 				connect_DR(loc_x, loc_y);
 				connect_DL(loc_x, loc_y);
 			}
 			else
-			{
-				for (x; x < col_count - 1; x++)
-				{
-					//   -----
-					//  / \
-					// /   \ 
-
-					connect_R(loc_x, loc_y);
-					connect_DL(loc_x, loc_y);
-					connect_DR(loc_x, loc_y);
-					loc_x += edge_width;
-				}
-				//
+				//   $
 				//  $
 				// $
-
 				connect_DL(loc_x, loc_y);
-			}
 			loc_y -= row_width;
 		}
 		if (y % 2) loc_x = corner1.real() - half_edge_width;
@@ -432,6 +415,11 @@ namespace zf
 	{
 		return nodes.insert({ gen_key(location), std::make_unique<Node<T>>(
 			location, f(location)) }).first->second.get();
+		//auto res = nodes.insert({ gen_key(location), std::make_unique<Node<T>>(
+		//	location, f(location)) });
+		//if (!res.second)
+		//	std::cout << "X";
+		//return res.first->second.get();
 	}
 
 	template<typename T>
@@ -588,6 +576,23 @@ namespace zf
 								node_sum += next->get_node(0)->location
 									+ next->get_node(1)->location;
 								sum_dq += next->get_dq();
+								for (int j = 2; j < 6; j++)
+								{
+									auto touching = next->get_node(0)
+										->get_edge(next->get_dir() + j);
+									if (touching)
+									{
+										next_tri(touching->get_tri(0));
+										next_tri(touching->get_tri(1));
+									}
+									touching = next->get_node(1)
+										->get_edge(next->get_dir() + j);
+									if (touching)
+									{
+										next_tri(touching->get_tri(0));
+										next_tri(touching->get_tri(1));
+									}
+								}
 							}
 							else
 								next_tri(tri->get_adjacent(i));
@@ -806,8 +811,8 @@ namespace zf
 	template<typename T>
 	inline std::pair<int64_t, int64_t> Mesh<T>::gen_key(cplx z)
 	{
-		int64_t a = z.real() / precision * 100 + 0.5;
-		int64_t b = z.imag() / precision * 100 + 0.5;
+		int64_t a = z.real() / precision * 4 + 0.5;
+		int64_t b = z.imag() / precision * 4 + 0.5;
 		return std::make_pair(a, b);
 	}
 
@@ -929,8 +934,8 @@ namespace zf
 		// finds the most candidate regions.
 		if (initial_mesh_len < 0)
 			initial_mesh_len = std::min(abs(ULcorner.real() - LRcorner.real())
-				/ 20.1, abs(ULcorner.imag() - LRcorner.imag()) / 20.1);
-		int iterations = std::log2(initial_mesh_len / precision);
+				/ 30, abs(ULcorner.imag() - LRcorner.imag()) / 30);
+		int iterations = ceil(std::log2(initial_mesh_len / precision));
 		Mesh<double> mesh(ULcorner, LRcorner, initial_mesh_len, precision, f,
 			return_0_order);
 
