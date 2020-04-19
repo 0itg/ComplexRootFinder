@@ -47,20 +47,22 @@ namespace zf
 	// initial mesh, but it cannot know whether it caught every one of them.
 	// If the it returns fewer zeros or poles than expected, try a finer mesh.
 
-	template <typename T>
-	std::vector<std::pair<std::complex<T>, int>> solve(std::complex<T> ULcorner,
-		std::complex<T> LRcorner, T precision,
-		std::function<std::complex<T>(std::complex<T>)> f,
-		bool return_0_order = false, T initial_mesh_len = -1);
+	template <class cplx> struct get_param;
 
+	template<typename cplx>
+	inline std::vector<std::pair<cplx, int>>
+		solve(cplx ULcorner, cplx LRcorner,
+			typename get_param<cplx>::type precision,
+			std::function<cplx(cplx)> f, bool return_0_order = false,
+			typename get_param<cplx>::type initial_mesh_len = -1);
 
-	template <typename T>
+	template <typename>
 	class Mesh;
-	template <typename T>
+	template <typename>
 	class Edge;
-	template <typename T>
+	template <typename>
 	class Node;
-	template <typename T>
+	template <typename>
 	class Triangle;
 
 	// Directions radiating hexagonally from a node.
@@ -89,56 +91,63 @@ namespace zf
 		else return b + a;
 	}
 
+	// Extracts the real-part data type of a complex number template class.
+	// Assuming the imaginary part will have the same type.
+	template <class complex_class>
+	struct get_param
+	{
+		static complex_class C;
+		typedef decltype(C.real()) type;
+	};
+
 	// Node for a trianglular mesh of complex numbers. Each node can have up to six
 	// connections to other nodes, represented by Edges.
-	template <typename T>
+	template <typename cplx>
 	class Node
 	{
-		typedef std::complex<T> cplx;
 	public:
 		Node(cplx loc, cplx val);
 		cplx location; // Geometric location of node
 		int q = 0; // Quadrant of value
 
-		Edge<T>* get_edge(int dir);
-		void set_edge(Edge<T>* e, int dir);
+		Edge<cplx>* get_edge(int dir);
+		void set_edge(Edge<cplx>* e, int dir);
 		void calc_q(cplx z);
 	private:
-		Edge<T>* edges[6] = {};
+		Edge<cplx>* edges[6] = {};
 	};
 
 	// Edge for triangular mesh of complex numbers. Each edge connects two
 	// nodes. Edges have one of six directions, mainly for facilitating 
 	// traversal of the mesh.
-	template <typename T>
+	template <typename cplx>
 	class Edge
 	{
-		typedef std::complex<T> cplx;
 	public:
-		Edge(Node<T>* node1, Node<T>* node2, int dir);
+		Edge(Node<cplx>* node1, Node<cplx>* node2, int dir);
 		~Edge();
-		Node<T>* get_node(int index) const;
-		void set_node(int index, Node<T>* node);
-		Triangle<T>* get_tri(int index) const;
-		void set_tri(Side index, Triangle<T>* tri);
+		Node<cplx>* get_node(int index) const;
+		void set_node(int index, Node<cplx>* node);
+		Triangle<cplx>* get_tri(int index) const;
+		void set_tri(Side index, Triangle<cplx>* tri);
 		int get_dir();
 		// Returns the clockwise-adjacent edge connected to the specified
 		// get_node.
-		Edge<T>* get_next_CW(int node) const;
+		Edge<cplx>* get_next_CW(int node) const;
 		// Returns the counter-clockwise-adjacent edge connected to the 
 		// specified get_node.
-		Edge<T>* get_next_CCW(int node) const;
+		Edge<cplx>* get_next_CCW(int node) const;
 		// Returns the connected edge in the same direction as this attached to
 		// node 1;
-		Edge<T>* get_continuation();
+		Edge<cplx>* get_continuation();
 		// Return the edge "steps" steps counter-clockwise around node;  
-		Edge<T>* get_next(int node, int steps);
+		Edge<cplx>* get_next(int node, int steps);
 
 		// Swaps the pointers for node 0 and node 1 and reverses the edge
 		// direction. The actual nodes are unaffected.
 		void reverse();
 
-		T length();
+		auto length();
 
 		// sets nodes to nullptr without modifying the nodes' stored
 		// connections. If any temporary edges are created during intermediate
@@ -151,25 +160,24 @@ namespace zf
 		bool boundary = false;
 		bool is_new = false;
 	private:
-		Node<T>* nodes[2] = {};
+		Node<cplx>* nodes[2] = {};
 		// Triangles are only needed after adapt_mesh().
 		// tris[0] should be triangle on left side.
-		Triangle<T>* tris[2] = {};
+		Triangle<cplx>* tris[2] = {};
 		int direction; // See enum Direction for meaning of values. 
 		int dq = 0; // Difference in quadrant of value for this edge's nodes.
 	};
 
 	// Triangles for finding boundary regions. Not used for constructing or
 	// refining the mesh. These are only created after those things are done.
-	template <typename T>
+	template <typename cplx>
 	class Triangle
 	{
-		typedef std::complex<T> cplx;
 	public:
-		Triangle(Edge<T>* a, Side a_side, Edge<T>* b,
-			Side b_side, Edge<T>* c, Side c_side);
-		Triangle<T>* get_adjacent(int index) const;
-		Edge<T>* get_edge(int index) const;
+		Triangle(Edge<cplx>* a, Side a_side, Edge<cplx>* b,
+			Side b_side, Edge<cplx>* c, Side c_side);
+		Triangle<cplx>* get_adjacent(int index) const;
+		Edge<cplx>* get_edge(int index) const;
 		// is any edge external
 		bool is_external();
 		// is the edge at this index external
@@ -180,7 +188,7 @@ namespace zf
 
 		bool visited = false;
 	private:
-		Edge<T>* edges[3];
+		Edge<cplx>* edges[3];
 	};
 };
 namespace std
@@ -197,33 +205,35 @@ namespace std
 };
 namespace zf
 {
-	template <typename T>
+	template <typename cplx>
 	class Mesh
 	{
-		typedef std::complex<T> cplx;
 	public:
-		Mesh(cplx corner1, cplx corner2, T init_prec, T final_prec,
+		Mesh(cplx corner1, cplx corner2,
+			typename get_param<cplx>::type init_prec,
+			typename get_param<cplx>::type final_prec,
 			std::function<cplx(cplx)> func, bool zero_order);
 
-		Node<T>* insert_node(cplx location);
+		Node<cplx>* insert_node(cplx location);
 
 		// Creates a get_node at the midpoint of this edge. Chosen edge will run
 		// from n1 to the new point, a new edge will be created from n2 to the
 		// new point.
-		Node<T>* split(Edge<T>* edge, T proportion = 0.5);
+		Node<cplx>* split(Edge<cplx>* edge,
+			typename get_param<cplx>::type proportion = 0.5);
 
 		// Creates an edge between two nodes, with direction specified from n1
 		// to n2.
-		void connect(Node<T>* n1, Node<T>* n2, int dir);
+		void connect(Node<cplx>* n1, Node<cplx>* n2, int dir);
 
 		// Looks for edges that would form triangles to the left and right of 
 		// this edge. Creates them if they do not exist. Creates new nodes in 
 		// temp_nodes if necessary, and searches there first to avoid
 		// duplicating new nodes.
-		void complete_quad(Edge<T>* e);
+		void complete_quad(Edge<cplx>* e);
 		// Calls complete_quad<Edge<T>*) with a temporary edge between the two
 		// given nodes.
-		void complete_quad(Node<T>* n0, Node<T>* n1, int dir);
+		void complete_quad(Node<cplx>* n0, Node<cplx>* n1, int dir);
 
 		// Returns estimated zeros/poles. pair includes the location of the
 		// zero/pole and the order (negative for poles, zero for a regular point
@@ -259,27 +269,36 @@ namespace zf
 		std::pair<int64_t, int64_t> gen_key(cplx z);
 	private:
 		std::unordered_map<std::pair<int64_t, int64_t>,
-			std::unique_ptr<Node<T>>> nodes;
-		std::vector<std::unique_ptr<Edge<T>>> edges;
-		std::vector<std::unique_ptr<Triangle<T>>> triangles;
+			std::unique_ptr<Node<cplx>>> nodes;
+		std::vector<std::unique_ptr<Edge<cplx>>> edges;
+		std::vector<std::unique_ptr<Triangle<cplx>>> triangles;
 
 		std::function<cplx(cplx)> f;
-		T precision;
+		typename get_param<cplx>::type precision;
 		bool return_0_order = false;
 	};
 
-	template<typename T>
-	inline Mesh<T>::Mesh(cplx corner1, cplx corner2, T edge_width, T final_prec,
+	template<typename cplx>
+	inline Mesh<cplx>::Mesh(cplx corner1, cplx corner2,
+		typename get_param<cplx>::type edge_width,
+		typename get_param<cplx>::type final_prec,
 		std::function<cplx(cplx)> func, bool zero_order)
 		: precision(final_prec), f(func), return_0_order(zero_order)
 	{
+		typedef typename get_param<cplx>::type T;
 		// ensures corner1 is the top left and corner2 is bottom right.
 		if (corner2.real() < corner1.real())
-			std::swap(reinterpret_cast<T(&)[2]>(corner1)[0],
-				reinterpret_cast<T(&)[2]>(corner2)[0]);
+		{
+			T temp_real = corner1.real();
+			corner1 = cplx(corner2.real(), corner1.imag());
+			corner2 = cplx(temp_real, corner2.imag());
+		}
 		if (corner2.imag() > corner1.imag())
-			std::swap(reinterpret_cast<T(&)[2]>(corner1)[1],
-				reinterpret_cast<T(&)[2]>(corner2)[1]);
+		{
+			T temp_imag = corner1.imag();
+			corner1 = cplx(corner1.real(), corner2.imag());
+			corner2 = cplx(corner2.real(), temp_imag);
+		}
 
 		const T width = corner2.real() - corner1.real();
 		const T height = corner1.imag() - corner2.imag();
@@ -410,10 +429,12 @@ namespace zf
 		extend_mesh();
 	}
 
-	template<typename T>
-	inline Node<T>* Mesh<T>::insert_node(cplx location)
+	template<typename cplx>
+	inline Node<cplx>* Mesh<cplx>::insert_node(cplx location)
 	{
-		return nodes.insert({ gen_key(location), std::make_unique<Node<T>>(
+		return nodes.insert({
+			gen_key(location),
+			std::make_unique<Node<cplx>>(
 			location, f(location)) }).first->second.get();
 		//auto res = nodes.insert({ gen_key(location), std::make_unique<Node<T>>(
 		//	location, f(location)) });
@@ -422,8 +443,9 @@ namespace zf
 		//return res.first->second.get();
 	}
 
-	template<typename T>
-	inline Node<T>* Mesh<T>::split(Edge<T>* edge, T t)
+	template<typename cplx>
+	inline Node<cplx>* Mesh<cplx>::split(Edge<cplx>* edge,
+		typename get_param<cplx>::type t)
 	{
 		 auto N = insert_node(t * edge->get_node(0)->location + (1 - t) *
 			edge->get_node(1)->location);
@@ -434,16 +456,16 @@ namespace zf
 		return N;
 	}
 
-	template<typename T>
-	inline void Mesh<T>::connect(Node<T>* n1, Node<T>* n2, int dir)
+	template<typename cplx>
+	inline void Mesh<cplx>::connect(Node<cplx>* n1, Node<cplx>* n2, int dir)
 	{
-		edges.push_back(std::make_unique<Edge<T>>(n1, n2, mod(dir, 6)));
+		edges.push_back(std::make_unique<Edge<cplx>>(n1, n2, mod(dir, 6)));
 		n1->set_edge(edges.back().get(), dir);
 		n2->set_edge(edges.back().get(), dir + 3);
 	}
 
-	template<typename T>
-	inline void Mesh<T>::complete_quad(Edge<T>* e)
+	template<typename cplx>
+	inline void Mesh<cplx>::complete_quad(Edge<cplx>* e)
 	{
 		auto add_edges = [&](bool right) {
 			int n0 = 0, n1 = 1;
@@ -457,7 +479,7 @@ namespace zf
 
 			// Can't have a candidate edge on the edge of the mesh, so we
 			// apply the same process to extend the newest edge if it is one.
-			auto recurse_if_candidate = [&](Edge<T>* e)
+			auto recurse_if_candidate = [&](Edge<cplx>* e)
 			{
 				if (abs(e->get_dq()) == 2)
 				{
@@ -528,17 +550,17 @@ namespace zf
 		add_edges(false);
 	}
 
-	template<typename T>
-	inline void Mesh<T>::complete_quad(Node<T>* n0, Node<T>* n1, int dir)
+	template<typename cplx>
+	inline void Mesh<cplx>::
+		complete_quad(Node<cplx>* n0, Node<cplx>* n1, int dir)
 	{
-		Edge<T> e(n0, n1, dir);
+		Edge<cplx> e(n0, n1, dir);
 		complete_quad(&e);
 		e.detach_nodes();
 	}
 
-	template<typename T>
-	inline std::vector<std::pair<std::complex<T>, int>>
-		Mesh<T>::find_zeros_and_poles()
+	template<typename cplx>
+	inline std::vector<std::pair<cplx, int>> Mesh<cplx>::find_zeros_and_poles()
 	{
 		auto candidates_end = create_region_triangles();
 
@@ -559,9 +581,9 @@ namespace zf
 				int boundarysize = 0;
 				float sum_dq = 0;
 				cplx node_sum = 0;
-				Edge<T>* next;
-				std::function<void(Triangle<T>*)> next_tri =
-					[&](Triangle<T>* tri)
+				Edge<cplx>* next;
+				std::function<void(Triangle<cplx>*)> next_tri =
+					[&](Triangle<cplx>* tri)
 				{
 					if (tri && !tri->visited)
 					{
@@ -611,8 +633,8 @@ namespace zf
 		return points;
 	}
 
-	template<typename T>
-	inline void Mesh<T>::adapt_mesh()
+	template<typename cplx>
+	inline void Mesh<cplx>::adapt_mesh()
 	{
 		auto candidate_end = candidates_to_front();
 
@@ -634,10 +656,9 @@ namespace zf
 		//  \/__\/
 		//   \  /
 		//    \/
-		std::function<void(Edge<T>*)> subdivide = [&](Edge<T>* e) {
+		std::function<void(Edge<cplx>*)> subdivide = [&](Edge<cplx>* e) {
 			auto e2 = e->get_continuation();
-
-			auto split_and_get_end_node = [&](Edge<T>* E)
+			auto split_and_get_end_node = [&](Edge<cplx>* E)
 			{
 				if (!E->is_new)
 				{
@@ -650,19 +671,20 @@ namespace zf
 
 			int dir = e->get_dir();
 
-			std::pair<Node<T>*, int> new_nodes[4] = {
+			std::pair<Node<cplx>*, int> new_nodes[4] = {
 			{ split_and_get_end_node(e->get_next_CW(0)), (dir - 2) },
 			{ split_and_get_end_node(e2->get_next_CCW(0)), (dir - 1) },
 			{ split_and_get_end_node(e2->get_next_CW(0)), (dir + 1) },
 			{ split_and_get_end_node(e->get_next_CCW(0)), (dir + 2) },
 			};
 
-			Edge<T>* new_edges[8] = {
+			Edge<cplx>* new_edges[8] = {
 				e->get_next_CW(0), e->get_next_CW(0)->get_continuation(),
 				e2->get_next_CCW(0), e2->get_next_CCW(0)->get_continuation(),
 				e2->get_next_CW(0), e2->get_next_CW(0)->get_continuation(),
 				e->get_next_CCW(0), e->get_next_CCW(0)->get_continuation()
 			};
+
 			auto candidate_midpoint = e->get_node(1);
 			//     .
 			//    . .
@@ -716,8 +738,8 @@ namespace zf
 		}
 	}
 
-	template<typename T>
-	inline auto Mesh<T>::candidates_to_front()
+	template<typename cplx>
+	inline auto Mesh<cplx>::candidates_to_front()
 	{
 		return std::partition(edges.begin(), edges.end(),
 			[](auto&& e)
@@ -726,8 +748,8 @@ namespace zf
 			});
 	}
 
-	template<typename T>
-	inline auto Mesh<T>::create_region_triangles()
+	template<typename cplx>
+	inline auto Mesh<cplx>::create_region_triangles()
 	{
 		auto candidate_end = candidates_to_front();
 
@@ -765,18 +787,18 @@ namespace zf
 				else
 					e4_side = Side::left;
 				if (!e->get_tri(1))
-					triangles.push_back(std::make_unique<Triangle<T>>(
+					triangles.push_back(std::make_unique<Triangle<cplx>>(
 						e.get(), Side::right, e1, e1_side, e2, e2_side));
 				if (!e->get_tri(0))
-					triangles.push_back(std::make_unique<Triangle<T>>(
+					triangles.push_back(std::make_unique<Triangle<cplx>>(
 						e.get(), Side::left, e3, e3_side, e4, e4_side));
 			});
 
 		return candidate_end;
 	}
 
-	template<typename T>
-	inline void Mesh<T>::extend_mesh()
+	template<typename cplx>
+	inline void Mesh<cplx>::extend_mesh()
 	{
 		auto C = candidates_to_front();
 		auto dist = std::distance(edges.begin(), C);
@@ -788,8 +810,8 @@ namespace zf
 		};
 	}
 
-	template<typename T>
-	inline void Mesh<T>::clear_flags()
+	template<typename cplx>
+	inline void Mesh<cplx>::clear_flags()
 	{
 		std::for_each(/*std::execution::par_unseq,*/ edges.begin(), edges.end(),
 			[](auto&& e)
@@ -799,8 +821,8 @@ namespace zf
 			});
 	}
 
-	template<typename T>
-	inline void Mesh<T>::cull_edges()
+	template<typename cplx>
+	inline void Mesh<cplx>::cull_edges()
 	{
 		edges.erase(std::remove_if(edges.begin(), edges.end(), [](auto&& e)
 			{
@@ -808,86 +830,86 @@ namespace zf
 			}), edges.end());
 	}
 
-	template<typename T>
-	inline std::pair<int64_t, int64_t> Mesh<T>::gen_key(cplx z)
+	template<typename cplx>
+	inline std::pair<int64_t, int64_t> Mesh<cplx>::gen_key(cplx z)
 	{
 		int64_t a = z.real() / precision * 4 + 0.5;
 		int64_t b = z.imag() / precision * 4 + 0.5;
 		return std::make_pair(a, b);
 	}
 
-	template<typename T>
-	inline Edge<T>::Edge(Node<T>* node1, Node<T>* node2, int dir)
+	template<typename cplx>
+	inline Edge<cplx>::Edge(Node<cplx>* node1, Node<cplx>* node2, int dir)
 		: nodes{ node1, node2 }, direction(dir)
 	{
 		calc_dq();
 	}
 
-	template<typename T>
-	inline Edge<T>::~Edge()
+	template<typename cplx>
+	inline Edge<cplx>::~Edge()
 	{
 		if (nodes[0]) nodes[0]->set_edge(nullptr, direction);
 		if (nodes[1]) nodes[1]->set_edge(nullptr, direction + 3);
 	}
 
-	template<typename T>
-	inline Node<T>* Edge<T>::get_node(int index) const
+	template<typename cplx>
+	inline Node<cplx>* Edge<cplx>::get_node(int index) const
 	{
 		return nodes[index];
 	}
 
-	template<typename T>
-	inline void Edge<T>::set_node(int i, Node<T>* N)
+	template<typename cplx>
+	inline void Edge<cplx>::set_node(int i, Node<cplx>* N)
 	{
 		nodes[i] = N;
 		N->set_edge(this, direction + i * 3);
 		calc_dq();
 	}
 
-	template<typename T>
-	inline Triangle<T>* Edge<T>::get_tri(int index) const
+	template<typename cplx>
+	inline Triangle<cplx>* Edge<cplx>::get_tri(int index) const
 	{
 		return tris[index];
 	}
 
-	template<typename T>
-	inline void Edge<T>::set_tri(Side index, Triangle<T>* tri)
+	template<typename cplx>
+	inline void Edge<cplx>::set_tri(Side index, Triangle<cplx>* tri)
 	{
 		tris[(int)index] = tri;
 	}
 
-	template<typename T>
-	inline int Edge<T>::get_dir()
+	template<typename cplx>
+	inline int Edge<cplx>::get_dir()
 	{
 		return direction;
 	}
 
-	template<typename T>
-	inline Edge<T>* Edge<T>::get_next_CW(int n) const
+	template<typename cplx>
+	inline Edge<cplx>* Edge<cplx>::get_next_CW(int n) const
 	{
 		return this->get_node(n)->get_edge(this->direction - 1 + 3 * n);
 	}
 
-	template<typename T>
-	inline Edge<T>* Edge<T>::get_next_CCW(int n) const
+	template<typename cplx>
+	inline Edge<cplx>* Edge<cplx>::get_next_CCW(int n) const
 	{
 		return this->get_node(n)->get_edge(this->direction + 1 + 3 * n);
 	}
 
-	template<typename T>
-	inline Edge<T>* Edge<T>::get_continuation()
+	template<typename cplx>
+	inline Edge<cplx>* Edge<cplx>::get_continuation()
 	{
 		return nodes[1]->get_edge(direction);
 	}
 
-	template<typename T>
-	inline Edge<T>* Edge<T>::get_next(int n, int steps)
+	template<typename cplx>
+	inline Edge<cplx>* Edge<cplx>::get_next(int n, int steps)
 	{
 		return this->get_node(n)->get_edge(this->direction + steps + 3 * n);
 	}
 
-	template<typename T>
-	inline void Edge<T>::reverse()
+	template<typename cplx>
+	inline void Edge<cplx>::reverse()
 	{
 		std::swap(nodes[0], nodes[1]);
 		std::swap(tris[0], tris[1]);
@@ -896,38 +918,39 @@ namespace zf
 		dq *= -1;
 	}
 
-	template<typename T>
-	inline T Edge<T>::length()
+	template<typename cplx>
+	inline auto Edge<cplx>::length()
 	{
 		return abs(nodes[1]->location - nodes[0]->location);
 	}
 
-	template<typename T>
-	inline void Edge<T>::detach_nodes()
+	template<typename cplx>
+	inline void Edge<cplx>::detach_nodes()
 	{
 		nodes[0] = nullptr;
 		nodes[1] = nullptr;
 	}
 
-	template<typename T>
-	inline int Edge<T>::get_dq() const
+	template<typename cplx>
+	inline int Edge<cplx>::get_dq() const
 	{
 		return dq;
 	}
 
-	template<typename T>
-	inline void Edge<T>::calc_dq()
+	template<typename cplx>
+	inline void Edge<cplx>::calc_dq()
 	{
 		dq = (nodes[1]->q - nodes[0]->q);
 		if (dq > 2) dq -= 4;
 		else if (dq < -2) dq += 4;
 	}
 
-	template<typename T>
-	inline std::vector<std::pair<std::complex<T>, int>>
-		solve(std::complex<T> ULcorner, std::complex<T> LRcorner, T precision,
-			std::function<std::complex<T>(std::complex<T>)> f,
-			bool return_0_order, T initial_mesh_len)
+	template<typename cplx>
+	inline std::vector<std::pair<cplx, int>>
+		solve(cplx ULcorner, cplx LRcorner,
+			typename get_param<cplx>::type precision,
+			std::function<cplx(cplx)> f, bool return_0_order,
+			typename get_param<cplx>::type initial_mesh_len)
 	{
 		// Arbitrary. Later could add a trial-and error mesh sizer which tests
 		// a few values in the desired neighborhood and picks the one which
@@ -936,7 +959,8 @@ namespace zf
 			initial_mesh_len = std::min(abs(ULcorner.real() - LRcorner.real())
 				/ 30, abs(ULcorner.imag() - LRcorner.imag()) / 30);
 		int iterations = ceil(std::log2(initial_mesh_len / precision));
-		Mesh<double> mesh(ULcorner, LRcorner, initial_mesh_len, precision, f,
+		Mesh<cplx>
+			mesh(ULcorner, LRcorner, initial_mesh_len, precision, f,
 			return_0_order);
 
 		for (int i = 0; i < iterations; i++)
@@ -947,74 +971,75 @@ namespace zf
 		}
 		return mesh.find_zeros_and_poles();
 	}
-	template<typename T>
-	inline Triangle<T>::Triangle(Edge<T>* a, Side a_side, Edge<T>* b,
-		Side b_side, Edge<T>* c, Side c_side)
+	template<typename cplx>
+	inline Triangle<cplx>::Triangle(Edge<cplx>* a, Side a_side, Edge<cplx>* b,
+		Side b_side, Edge<cplx>* c, Side c_side)
 		: edges{ a, b, c }
 	{
 		a->set_tri(a_side, this);
 		b->set_tri(b_side, this);
 		c->set_tri(c_side, this);
 	}
-	template<typename T>
-	inline Triangle<T>* Triangle<T>::get_adjacent(int index) const
+	template<typename cplx>
+	inline Triangle<cplx>* Triangle<cplx>::get_adjacent(int index) const
 	{
 		auto edge = edges[index];
 		if (this == edge->get_tri(0))
 			return edge->get_tri(1);
 		else return edge->get_tri(0);
 	}
-	template<typename T>
-	inline Edge<T>* Triangle<T>::get_edge(int index) const
+	template<typename cplx>
+	inline Edge<cplx>* Triangle<cplx>::get_edge(int index) const
 	{
 		return edges[index];
 	}
-	template<typename T>
-	inline bool Triangle<T>::is_external()
+	template<typename cplx>
+	inline bool Triangle<cplx>::is_external()
 	{
 		return get_adjacent(0) || get_adjacent(1) || get_adjacent(2);
 	}
-	template<typename T>
-	inline bool Triangle<T>::is_external(int index)
+	template<typename cplx>
+	inline bool Triangle<cplx>::is_external(int index)
 	{
 		return !get_adjacent(index);
 	}
-	template<typename T>
-	inline void Triangle<T>::make_CCW()
+	template<typename cplx>
+	inline void Triangle<cplx>::make_CCW()
 	{
 		for (auto e : edges)
 		{
 			if (e->get_tri(0) != this) e->reverse();
 		}
 	}
-	template<typename T>
-	inline std::complex<T> Triangle<T>::get_center()
+	template<typename cplx>
+	inline cplx Triangle<cplx>::get_center()
 	{
 		cplx res = 0;
 		for (auto e : edges)
 			res += e->get_node(0)->location;
 		return res / 3.0;
 	}
-	template<typename T>
-	inline Node<T>::Node(cplx loc, cplx val)
+	template<typename cplx>
+	inline Node<cplx>::Node(cplx loc, cplx val)
 		: location(loc)
 	{
 		calc_q(val);
 	}
-	template<typename T>
-	inline Edge<T>* Node<T>::get_edge(int dir)
+	template<typename cplx>
+	inline Edge<cplx>* Node<cplx>::get_edge(int dir)
 	{
 		return edges[mod(dir, 6)];
 	}
-	template<typename T>
-	inline void Node<T>::set_edge(Edge<T>* e, int dir)
+	template<typename cplx>
+	inline void Node<cplx>::set_edge(Edge<cplx>* e, int dir)
 	{
 		edges[mod(dir, 6)] = e;
 	}
-	template<typename T>
-	inline void Node<T>::calc_q(cplx z)
+	template<typename cplx>
+	inline void Node<cplx>::calc_q(cplx z)
 	{
-		if (T a = std::arg(z); a >= 0) q = ceil(a / M_PI_2);
+		if (typename get_param<cplx>::type
+			a = std::arg(z); a >= 0) q = ceil(a / M_PI_2);
 		else q = 4 + ceil(a / M_PI_2);
 	}
 }
