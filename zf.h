@@ -1,5 +1,4 @@
 #pragma once
-#define _USE_MATH_DEFINES
 #include <complex>
 #include <vector>
 #include <unordered_map>
@@ -22,39 +21,59 @@
 // subdivided region so that any missing edges are not adjacent to the
 // candidate edges.
 
+// To use, just apply the function, solve(), below. The rest is
+// implementation, but one could perhaps use the Mesh object directly to
+// cache results.
+//
+// Arguments:
+//
+// ULcorner, LRcorner : Upper-left and lower-right corners of the 
+//		rectangular search region.
+// precision: Final length of mesh edges will be less than this.
+// f: Any analytic function.
+// initial_mesh_len: starting length of mesh edges. Smaller is less likely 
+//		to miss a zero, but slower. -1 (default) means the function will
+//		try to choose something appropriate.
+//
+// Returns:
+// vector of results for each point. first is the location of the zero/pole,
+// second is the order. If the order is zero, it may be a regular point, or
+// it may signify an equal number of zeros and poles in the same region.
+// The algorithm should catch all zeros and poles with a sufficiently fine
+// initial mesh, but it cannot know whether it caught every one of them.
+// If the it returns fewer zeros or poles than expected, try a finer mesh.
+//
+// NOTES:
+// A limitation of the algorithm is that it does not properly detect zeros
+// or poles at branch points or on branch cuts. As a workaround, if you know
+// the original function, you may be able to modify it to locate these
+// points, e.g. squaring a function with a sqrt() term.
+//
+// The algorithm's template is designed to accept any "typical" complex
+// number type. Specifically, it should implement real(), imag(), member
+// functions returning the same data type, an arg() function/overload, and
+// appropriate overloads for the standard math operations. The underlying
+// data type should support comparison operations, standard math operations,
+// and some common math functions: sin(), log(), abs(), trunc(). It also 
+// requires a specialization of std::hash, which can be defined by the user 
+// if it doesn't exist. Hopefully this last requirement can be eased in the
+// future.
+//
+// So far the algorithm has been tested with std::complex<double>,
+// std::complex<boost::multiprecision::number<boost::multiprecision
+// ::cpp_bin_float<100>>, and boost::multiprecision::cpp_complex_quad
+
 namespace zf
 {
-	// To use, just apply the function, solve(), below. The rest is
-	// implementation, but one could perhaps use the Mesh object directly to
-	// cache results.
-	//
-	// Arguments:
-	//
-	// ULcorner, LRcorner : Upper-left and lower-right corners of the 
-	//		rectangular search region.
-	// precision: Final length of mesh edges will be less than this.
-	// f: Any analytic function.
-	// return_0_order: If true, returns points of order 0 (discards if false).
-	// initial_mesh_len: starting length of mesh edges. Smaller is less likely 
-	//		to miss a zero, but slower. -1 (default) means the function will
-	//		try to choose something appropriate.
-	//
-	// Returns:
-	// vector of results for each point. first is the location of the zero/pole,
-	// second is the order. If the order is zero, it may be a regular point, or
-	// it may signify an equal number of zeros and poles in the same region.
-	// The algorithm should catch all zeros and poles with a sufficiently fine
-	// initial mesh, but it cannot know whether it caught every one of them.
-	// If the it returns fewer zeros or poles than expected, try a finer mesh.
-
 	template <class cplx> struct get_param;
 
 	template<typename cplx>
 	inline std::vector<std::pair<cplx, int>>
 		solve(cplx ULcorner, cplx LRcorner,
 			typename get_param<cplx>::type precision,
-			std::function<cplx(cplx)> f, bool return_0_order = false,
-			typename get_param<cplx>::type initial_mesh_len = -1);
+			std::function<cplx(cplx)> f,
+			typename get_param<cplx>::type initial_mesh_len
+			= typename get_param<cplx>::type(-1.0));
 
 	template <typename>
 	class Mesh;
@@ -193,13 +212,12 @@ namespace zf
 };
 namespace std
 {
-	typedef std::pair<int64_t, int64_t> key;
-	template <>
-	class hash<key> {
+	template <typename data_t>
+	class hash<std::pair<data_t, data_t>> {
 	public:
-		size_t operator()(const key& name) const
+		size_t operator()(const std::pair<data_t, data_t>& k) const
 		{
-			return hash<int64_t>()(name.first) ^ hash<int64_t>()(name.second);
+			return hash<data_t>()(k.first) ^ hash<data_t>()(k.second);
 		}
 	};
 };
@@ -209,18 +227,20 @@ namespace zf
 	class Mesh
 	{
 	public:
+		typedef typename get_param<cplx>::type data_t;
+
 		Mesh(cplx corner1, cplx corner2,
 			typename get_param<cplx>::type init_prec,
 			typename get_param<cplx>::type final_prec,
-			std::function<cplx(cplx)> func, bool zero_order);
+			std::function<cplx(cplx)> func);
 
 		Node<cplx>* insert_node(cplx location);
 
 		// Creates a get_node at the midpoint of this edge. Chosen edge will run
 		// from n1 to the new point, a new edge will be created from n2 to the
 		// new point.
-		Node<cplx>* split(Edge<cplx>* edge,
-			typename get_param<cplx>::type proportion = 0.5);
+		Node<cplx>* split(Edge<cplx>* edge/*,
+			typename get_param<cplx>::type proportion = 0.5*/);
 
 		// Creates an edge between two nodes, with direction specified from n1
 		// to n2.
@@ -266,24 +286,30 @@ namespace zf
 		// remain.
 		void cull_edges();
 
-		std::pair<int64_t, int64_t> gen_key(cplx z);
+		std::pair<data_t, data_t> gen_key(cplx z);
+
+		size_t get_edge_count() { return edges.size(); }
+
+		// Gets pi to the precision of the data type, assuming atan() is
+		// accurate.
+		inline static const data_t PI = 4 * atan(data_t(1.0));
+		inline static const data_t PI_2 = 2 * atan(data_t(1.0));
 	private:
-		std::unordered_map<std::pair<int64_t, int64_t>,
+		std::unordered_map<std::pair<data_t, data_t>,
 			std::unique_ptr<Node<cplx>>> nodes;
 		std::vector<std::unique_ptr<Edge<cplx>>> edges;
 		std::vector<std::unique_ptr<Triangle<cplx>>> triangles;
 
 		std::function<cplx(cplx)> f;
-		typename get_param<cplx>::type precision;
-		bool return_0_order = false;
+		data_t precision;
 	};
 
 	template<typename cplx>
 	inline Mesh<cplx>::Mesh(cplx corner1, cplx corner2,
 		typename get_param<cplx>::type edge_width,
 		typename get_param<cplx>::type final_prec,
-		std::function<cplx(cplx)> func, bool zero_order)
-		: precision(final_prec), f(func), return_0_order(zero_order)
+		std::function<cplx(cplx)> func)
+		: precision(final_prec), f(func)
 	{
 		typedef typename get_param<cplx>::type T;
 		// ensures corner1 is the top left and corner2 is bottom right.
@@ -303,11 +329,11 @@ namespace zf
 		const T width = corner2.real() - corner1.real();
 		const T height = corner1.imag() - corner2.imag();
 
-		const int col_count = ceil(width / edge_width);
+		const int col_count = (int)ceil(width / edge_width);
 
 		// The mesh will be constructed as an equilateral triangular grid, so we
 		// need the height of the triangles.
-		const T row_width = edge_width * sin(M_PI / 3);
+		const T row_width = edge_width * sin(PI / data_t(3.0));
 
 		const int row_count = 1 + (int)ceil(height / row_width);
 		const int node_count = row_count * col_count;
@@ -436,19 +462,13 @@ namespace zf
 			gen_key(location),
 			std::make_unique<Node<cplx>>(
 			location, f(location)) }).first->second.get();
-		//auto res = nodes.insert({ gen_key(location), std::make_unique<Node<T>>(
-		//	location, f(location)) });
-		//if (!res.second)
-		//	std::cout << "X";
-		//return res.first->second.get();
 	}
 
 	template<typename cplx>
-	inline Node<cplx>* Mesh<cplx>::split(Edge<cplx>* edge,
-		typename get_param<cplx>::type t)
+	inline Node<cplx>* Mesh<cplx>::split(Edge<cplx>* edge)
 	{
-		 auto N = insert_node(t * edge->get_node(0)->location + (1 - t) *
-			edge->get_node(1)->location);
+		 auto N = insert_node((edge->get_node(0)->location +
+			 edge->get_node(1)->location) / data_t(2.0));
 		connect(edge->get_node(1), N, edge->get_dir() + 3);
 		edge->set_node(1, N);
 		edge->is_new = true;
@@ -467,10 +487,10 @@ namespace zf
 	template<typename cplx>
 	inline void Mesh<cplx>::complete_quad(Edge<cplx>* e)
 	{
-		auto add_edges = [&](bool right) {
+		auto add_edges = [&](Side side) {
 			int n0 = 0, n1 = 1;
 			int dir_change1 = 1, dir_change2 = 2;
-			if (!right)
+			if (side == Side::left)
 			{
 				std::swap(n0, n1);
 				std::swap(dir_change1, dir_change2);
@@ -489,12 +509,12 @@ namespace zf
 
 			// If one edge does not exist, uses the second point from the other
 			// edge to create it.
-			auto add_one_edge = [&](bool CCW) {
-				int dir = CCW ? 1 : -1;
-				int dir_change = CCW ? dir_change1 : dir_change2;
+			auto add_one_edge = [&](Side CW) {
+				int dir = (bool)CW ? -1 : 1;
+				int dir_change = (bool)CW ? dir_change2 : dir_change1;
 				int n_0 = n0;
 				int n_1 = n1;
-				if (!CCW) std::swap(n_0, n_1);
+				if (CW == Side::right) std::swap(n_0, n_1);
 
 				// N needs to be the node not shared with e, so we store one,
 				// check it, and if matches, store the other, instead.
@@ -502,9 +522,8 @@ namespace zf
 				auto N = e2->get_node(n_1);
 				if (N == e->get_node(n_1))
 					N = e2->get_node(n_0);
-				auto elen = e->length();
-				auto e2len = e2->length();
-
+				//auto elen = e->length();
+				//auto e2len = e2->length();
 				if (!e2->is_new)
 				{
 					connect(e->get_node(n_0), N, e->get_dir()
@@ -528,8 +547,8 @@ namespace zf
 				// adding a number with the same length as e, rotated
 				// appropriately.
 				auto N = insert_node(e->get_node(n0)->location + e->length()
-					* exp((e->get_dir() + dir_change1 * neg)
-						* M_PI / 3 * cplx(0, 1)));
+					* exp(data_t((e->get_dir() + dir_change1 * neg))
+						 * cplx(0, PI) / data_t(3.0)));
 
 				connect(e->get_node(n0), N, e->get_dir() + neg * dir_change1);
 				recurse_if_candidate(edges.back().get());
@@ -538,16 +557,16 @@ namespace zf
 			}
 			else if (!e->get_next_CW(n0))
 			{
-				add_one_edge(true);
+				add_one_edge(Side::left);
 			}
 			else if (!e->get_next_CCW(n1))
 			{
-				add_one_edge(false);
+				add_one_edge(Side::right);
 			}
 		};
 
-		add_edges(true);
-		add_edges(false);
+		add_edges(Side::right);
+		add_edges(Side::left);
 	}
 
 	template<typename cplx>
@@ -580,7 +599,7 @@ namespace zf
 				cplx interior_point = triangle->get_center();
 				int boundarysize = 0;
 				float sum_dq = 0;
-				cplx node_sum = 0;
+				cplx node_sum = cplx(0.0);
 				Edge<cplx>* next;
 				std::function<void(Triangle<cplx>*)> next_tri =
 					[&](Triangle<cplx>* tri)
@@ -831,10 +850,11 @@ namespace zf
 	}
 
 	template<typename cplx>
-	inline std::pair<int64_t, int64_t> Mesh<cplx>::gen_key(cplx z)
+	inline std::pair<typename get_param<cplx>::type,
+		typename get_param<cplx>::type> Mesh<cplx>::gen_key(cplx z)
 	{
-		int64_t a = z.real() / precision * 4 + 0.5;
-		int64_t b = z.imag() / precision * 4 + 0.5;
+		data_t a = trunc(z.real() / precision * data_t(4.0) + data_t(0.5));
+		data_t b = trunc(z.imag() / precision * data_t(4.0) + data_t(0.5));
 		return std::make_pair(a, b);
 	}
 
@@ -949,25 +969,53 @@ namespace zf
 	inline std::vector<std::pair<cplx, int>>
 		solve(cplx ULcorner, cplx LRcorner,
 			typename get_param<cplx>::type precision,
-			std::function<cplx(cplx)> f, bool return_0_order,
+			std::function<cplx(cplx)> f,
 			typename get_param<cplx>::type initial_mesh_len)
 	{
+		typedef typename get_param<cplx>::type data_t;
+
+		// If the specified precision is too fine to actually be usable with
+		// the given data type over the specified range, grow it until it works.
+		// This is very crude but at least it does not depend on any details of
+		// the underlying data type.
+		auto region_crossing = std::max(abs(ULcorner.real() - LRcorner.real()),
+			abs(ULcorner.imag() - LRcorner.imag()));
+		bool increased_prec = false;
+		while (data_t(region_crossing) + precision == data_t(region_crossing))
+		{
+			precision *= 2;
+			increased_prec = true;
+		}
+		if (increased_prec) precision *= 512;
+
+		// At high precisions relative to the data type, floating point
+		// instability becomes an issue and can cause the number of edges
+		// to explode. When or if this happens depends on the specific function
+		// being analyzed. Past the initial refinement of the mesh, if the
+		// number of edges exceeds edge_limit, the refinement step terminates
+		// early.
+		const int edge_limit = 2000;
+
 		// Arbitrary. Later could add a trial-and error mesh sizer which tests
 		// a few values in the desired neighborhood and picks the one which
 		// finds the most candidate regions.
-		if (initial_mesh_len < 0)
+		if (initial_mesh_len < data_t(0.0))
 			initial_mesh_len = std::min(abs(ULcorner.real() - LRcorner.real())
-				/ 30, abs(ULcorner.imag() - LRcorner.imag()) / 30);
-		int iterations = ceil(std::log2(initial_mesh_len / precision));
+				/ data_t(30.0), abs(ULcorner.imag()
+					- LRcorner.imag()) / data_t(30.0));
+		int iterations = (int)ceil(log(data_t(log(2.0))
+			* initial_mesh_len / precision));
+
 		Mesh<cplx>
-			mesh(ULcorner, LRcorner, initial_mesh_len, precision, f,
-			return_0_order);
+			mesh(ULcorner, LRcorner, initial_mesh_len, precision, f);
 
 		for (int i = 0; i < iterations; i++)
 		{
 			mesh.adapt_mesh();
 			mesh.cull_edges();
 			mesh.clear_flags();
+			if (i > 2 && mesh.get_edge_count() > edge_limit)
+				break;
 		}
 		return mesh.find_zeros_and_poles();
 	}
@@ -1014,10 +1062,11 @@ namespace zf
 	template<typename cplx>
 	inline cplx Triangle<cplx>::get_center()
 	{
-		cplx res = 0;
+		typedef typename get_param<cplx>::type data_t;
+		cplx res = cplx(0.0);
 		for (auto e : edges)
 			res += e->get_node(0)->location;
-		return res / 3.0;
+		return res / data_t(3.0);
 	}
 	template<typename cplx>
 	inline Node<cplx>::Node(cplx loc, cplx val)
@@ -1038,8 +1087,9 @@ namespace zf
 	template<typename cplx>
 	inline void Node<cplx>::calc_q(cplx z)
 	{
-		if (typename get_param<cplx>::type
-			a = std::arg(z); a >= 0) q = ceil(a / M_PI_2);
-		else q = 4 + ceil(a / M_PI_2);
+		typedef typename get_param<cplx>::type data_t;
+		if (data_t a = arg(z); a >= 0)
+			q = (int)ceil(a / Mesh<cplx>::PI_2);
+		else q = 4 + (int)ceil(a / Mesh<cplx>::PI_2);
 	}
 }
