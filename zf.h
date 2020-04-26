@@ -4,9 +4,7 @@
 #include <unordered_map>
 #include <functional>
 #include <algorithm>
-#include <execution>
-#include <iostream>
-#include <limits>
+//#include <execution>
 
 // Algorithm due to Piotr Kowalczyk,
 // "Global Complex Roots and Poles Finding Algorithm Based on Phase Analysis
@@ -34,6 +32,9 @@
 // initial_mesh_len: starting length of mesh edges. Smaller is less likely 
 //		to miss a zero, but slower. -1 (default) means the function will
 //		try to choose something appropriate.
+// edge_limit: If the function ever generates more edges than this number,
+// it throws an exception. Default is 50000. Set to 0 to disable and risk 
+// letting memory usage explode.
 //
 // Returns:
 // vector of results for each point. first is the location of the zero/pole,
@@ -50,14 +51,13 @@
 // points, e.g. squaring a function with a sqrt() term.
 //
 // The algorithm's template is designed to accept any "typical" complex
-// number type. Specifically, it should implement real(), imag(), member
-// functions returning the same data type, an arg() function/overload, and
-// appropriate overloads for the standard math operations. The underlying
-// data type should support comparison operations, standard math operations,
-// and some common math functions: sin(), log(), abs(), trunc(). It also 
-// requires a specialization of std::hash, which can be defined by the user 
-// if it doesn't exist. Hopefully this last requirement can be eased in the
-// future.
+// number type. Specifically, it should implement appropriate overloads for
+// the standard math operations, as well as real(), imag(), and arg().
+// The underlying data type should support comparison operations, standard 
+// math operations, and some common math functions: sin(), atan(), log(), abs(), 
+// trunc(). It also requires a specialization of std::hash, which can be defined
+// by the user if it doesn't exist. Some of these requirements could be eased
+// in the future.
 //
 // So far the algorithm has been tested with std::complex<double>,
 // std::complex<boost::multiprecision::number<boost::multiprecision
@@ -73,7 +73,8 @@ namespace zf
 			typename get_param<cplx>::type precision,
 			std::function<cplx(cplx)> f,
 			typename get_param<cplx>::type initial_mesh_len
-			= typename get_param<cplx>::type(-1.0));
+			= typename get_param<cplx>::type(-1.0),
+			int edge_limit = 50000);
 
 	template <typename>
 	class Mesh;
@@ -116,7 +117,7 @@ namespace zf
 	struct get_param
 	{
 		static complex_class C;
-		typedef decltype(C.real()) type;
+		typedef decltype(real(C)) type;
 	};
 
 	// Node for a trianglular mesh of complex numbers. Each node can have up to six
@@ -213,11 +214,11 @@ namespace zf
 namespace std
 {
 	template <typename data_t>
-	class hash<std::pair<data_t, data_t>> {
+	class hash<std::complex<data_t>> {
 	public:
-		size_t operator()(const std::pair<data_t, data_t>& k) const
+		size_t operator()(const std::complex<data_t>& k) const
 		{
-			return hash<data_t>()(k.first) ^ hash<data_t>()(k.second);
+			return hash<data_t>()(real(k)) ^ hash<data_t>()(imag(k));
 		}
 	};
 };
@@ -232,7 +233,8 @@ namespace zf
 		Mesh(cplx corner1, cplx corner2,
 			typename get_param<cplx>::type init_prec,
 			typename get_param<cplx>::type final_prec,
-			std::function<cplx(cplx)> func);
+			std::function<cplx(cplx)> func,
+			int edge_limit = 0);
 
 		Node<cplx>* insert_node(cplx location);
 
@@ -286,7 +288,7 @@ namespace zf
 		// remain.
 		void cull_edges();
 
-		std::pair<data_t, data_t> gen_key(cplx z);
+		cplx gen_key(cplx z);
 
 		size_t get_edge_count() { return edges.size(); }
 
@@ -295,39 +297,39 @@ namespace zf
 		inline static const data_t PI = 4 * atan(data_t(1.0));
 		inline static const data_t PI_2 = 2 * atan(data_t(1.0));
 	private:
-		std::unordered_map<std::pair<data_t, data_t>,
-			std::unique_ptr<Node<cplx>>> nodes;
+		std::unordered_map<cplx, std::unique_ptr<Node<cplx>>> nodes;
 		std::vector<std::unique_ptr<Edge<cplx>>> edges;
 		std::vector<std::unique_ptr<Triangle<cplx>>> triangles;
 
 		std::function<cplx(cplx)> f;
 		data_t precision;
+		int edge_limit;
 	};
 
 	template<typename cplx>
 	inline Mesh<cplx>::Mesh(cplx corner1, cplx corner2,
 		typename get_param<cplx>::type edge_width,
 		typename get_param<cplx>::type final_prec,
-		std::function<cplx(cplx)> func)
-		: precision(final_prec), f(func)
+		std::function<cplx(cplx)> func, int edge_lim)
+		: precision(final_prec), f(func), edge_limit(edge_lim)
 	{
 		typedef typename get_param<cplx>::type T;
 		// ensures corner1 is the top left and corner2 is bottom right.
-		if (corner2.real() < corner1.real())
+		if (real(corner2) < real(corner1))
 		{
-			T temp_real = corner1.real();
-			corner1 = cplx(corner2.real(), corner1.imag());
-			corner2 = cplx(temp_real, corner2.imag());
+			T temp_real = real(corner1);
+			corner1 = cplx(real(corner2), imag(corner1));
+			corner2 = cplx(temp_real, imag(corner2));
 		}
-		if (corner2.imag() > corner1.imag())
+		if (imag(corner2) > imag(corner1))
 		{
-			T temp_imag = corner1.imag();
-			corner1 = cplx(corner1.real(), corner2.imag());
-			corner2 = cplx(corner2.real(), temp_imag);
+			T temp_imag = imag(corner1);
+			corner1 = cplx(real(corner1), imag(corner2));
+			corner2 = cplx(real(corner2), temp_imag);
 		}
 
-		const T width = corner2.real() - corner1.real();
-		const T height = corner1.imag() - corner2.imag();
+		const T width = real(corner2) - real(corner1);
+		const T height = imag(corner1) - imag(corner2);
 
 		const int col_count = (int)ceil(width / edge_width);
 
@@ -344,47 +346,32 @@ namespace zf
 		edges.reserve(3 * node_count - 2 * (row_count + col_count) + 1 + 200);
 
 		const T half_edge_width = edge_width / 2;
-		T loc_y = corner1.imag();
+		T loc_y = imag(corner1);
 		T loc_x;
-
-		// create the nodes
-		for (int y = 0; y < row_count; y++)
-		{
-			if (y % 2) loc_x = corner1.real() - half_edge_width;
-			else loc_x = corner1.real();
-
-			for (int x = 0; x < col_count; x++)
-			{
-				insert_node(cplx(loc_x, loc_y));
-				loc_x += edge_width;
-			}
-
-			loc_y -= row_width;
-		}
 
 		// Lambdas for readability in the following get_node connection section.
 
 		auto connect_R = [=](T loc_x, T loc_y)
 		{
-			connect(nodes[gen_key(cplx(loc_x, loc_y))].get(),
-				nodes[gen_key(cplx(loc_x + edge_width, loc_y))].get(),
+			connect(insert_node(cplx(loc_x, loc_y)),
+				insert_node(cplx(loc_x + edge_width, loc_y)),
 				(int)Direction::right);
 		};
 
 		auto connect_DL = [=](T loc_x, T loc_y)
 		{
-			connect(nodes[gen_key(cplx(loc_x, loc_y))].get(),
-				nodes[gen_key(cplx(loc_x - half_edge_width,
-					loc_y - row_width))].get(),
-				(int)Direction::down_left);
+			connect(insert_node(cplx(loc_x, loc_y)),
+				insert_node(cplx(loc_x - half_edge_width,
+					loc_y - row_width)),
+					(int)Direction::down_left);
 		};
 
 		auto connect_DR = [=](T loc_x, T loc_y)
 		{
-			connect(nodes[gen_key(cplx(loc_x, loc_y))].get(),
-				nodes[gen_key(cplx(loc_x + half_edge_width,
-					loc_y - row_width))].get(),
-				(int)Direction::down_right);
+			connect(insert_node(cplx(loc_x, loc_y)),
+				insert_node(cplx(loc_x + half_edge_width,
+					loc_y - row_width)),
+					(int)Direction::down_right);
 		};
 
 		// Nodes are connected in an equilateral triangular grid, with the bases
@@ -400,12 +387,12 @@ namespace zf
 		//     ***** *****  <--- Last row
 		//      <->   Repeat as necessary
 		int x, y;
-		loc_y = corner1.imag();
+		loc_y = imag(corner1);
 		for (y = 0; y < row_count - 1; y++)
 		{
 			x = 0;
-			if (y % 2) loc_x = corner1.real() - half_edge_width;
-			else loc_x = corner1.real();
+			if (y % 2) loc_x = real(corner1) - half_edge_width;
+			else loc_x = real(corner1);
 			if (y % 2)
 			{
 				//  ~~~~~
@@ -441,8 +428,8 @@ namespace zf
 				connect_DL(loc_x, loc_y);
 			loc_y -= row_width;
 		}
-		if (y % 2) loc_x = corner1.real() - half_edge_width;
-		else loc_x = corner1.real();
+		if (y % 2) loc_x = real(corner1) - half_edge_width;
+		else loc_x = real(corner1);
 		for (x = 0; x < col_count - 1; x++)
 		{
 			//
@@ -660,7 +647,7 @@ namespace zf
 		auto dist = std::distance(edges.begin(), candidate_end);
 
 		// Splits the candidate edges in half.
-		for (size_t i = 0; i < dist; i++)
+		for (int i = 0; i < dist; i++)
 		{
 			split(edges[i].get());
 		}
@@ -675,7 +662,14 @@ namespace zf
 		//  \/__\/
 		//   \  /
 		//    \/
+		int recursion_depth;
 		std::function<void(Edge<cplx>*)> subdivide = [&](Edge<cplx>* e) {
+			// Under normal circumstances, recursion_depth shouldn't exceed 2-3.
+			// However, FP instability seems to make it go nuts under some
+			// circumstances, hence the hard cutoff. Chances of this messing up
+			// a legitimate boundary are low but theoretically nonzero.
+			if (recursion_depth > 6) return;
+
 			auto e2 = e->get_continuation();
 			auto split_and_get_end_node = [&](Edge<cplx>* E)
 			{
@@ -745,15 +739,21 @@ namespace zf
 			{
 				if (!ne->boundary && abs(ne->get_dq()) == 2)
 				{
+					recursion_depth++;
 					ne->boundary = true;
 					subdivide(ne);
 				}
 			}
 		};
 
-		for (size_t i = 0; i < dist; i++)
+		for (int i = 0; i < dist; i++)
 		{
+			recursion_depth = 0;
 			subdivide(edges[i].get());
+			if (edge_limit > 0 && get_edge_count() > edge_limit)
+				throw std::exception("Edge count exceeded! Specify a higher "
+					"value (uses more memory), reduce "
+					"precision, or set a smaller region.");
 		}
 	}
 
@@ -847,15 +847,29 @@ namespace zf
 			{
 				return !e->is_new;
 			}), edges.end());
+
+		// Remove unused nodes, i.e. ones with no edges connected.
+		// Keeps memory usage down somewhat.
+		auto itr = nodes.begin();
+		auto end = nodes.end();
+		while (itr != end)
+		{
+			auto n = (*itr).second.get();
+			if (!n->get_edge(0) && !n->get_edge(1)
+				&& !n->get_edge(2) && !n->get_edge(3)
+				&& !n->get_edge(4) && !n->get_edge(5))
+				itr = nodes.erase(itr);
+			else itr++;
+		}
+		nodes.rehash(0);
 	}
 
 	template<typename cplx>
-	inline std::pair<typename get_param<cplx>::type,
-		typename get_param<cplx>::type> Mesh<cplx>::gen_key(cplx z)
+	inline cplx Mesh<cplx>::gen_key(cplx z)
 	{
-		data_t a = trunc(z.real() / precision * data_t(4.0) + data_t(0.5));
-		data_t b = trunc(z.imag() / precision * data_t(4.0) + data_t(0.5));
-		return std::make_pair(a, b);
+		data_t a = trunc(real(z) / precision * data_t(4.0) + data_t(0.5));
+		data_t b = trunc(imag(z) / precision * data_t(4.0) + data_t(0.5));
+		return cplx(a, b);
 	}
 
 	template<typename cplx>
@@ -970,52 +984,71 @@ namespace zf
 		solve(cplx ULcorner, cplx LRcorner,
 			typename get_param<cplx>::type precision,
 			std::function<cplx(cplx)> f,
-			typename get_param<cplx>::type initial_mesh_len)
+			typename get_param<cplx>::type initial_mesh_len,
+			int edge_limit)
 	{
 		typedef typename get_param<cplx>::type data_t;
+
+		//auto range = std::max(abs(real(ULcorner) - real(LRcorner)),
+		//	abs(imag(ULcorner) - imag(LRcorner)));
 
 		// If the specified precision is too fine to actually be usable with
 		// the given data type over the specified range, grow it until it works.
 		// This is very crude but at least it does not depend on any details of
 		// the underlying data type.
-		auto region_crossing = std::max(abs(ULcorner.real() - LRcorner.real()),
-			abs(ULcorner.imag() - LRcorner.imag()));
-		bool increased_prec = false;
-		while (data_t(region_crossing) + precision == data_t(region_crossing))
-		{
-			precision *= 2;
-			increased_prec = true;
-		}
-		if (increased_prec) precision *= 512;
 
-		// At high precisions relative to the data type, floating point
-		// instability becomes an issue and can cause the number of edges
-		// to explode. When or if this happens depends on the specific function
-		// being analyzed. Past the initial refinement of the mesh, if the
-		// number of edges exceeds edge_limit, the refinement step terminates
-		// early.
-		const int edge_limit = 2000;
+		data_t limits[4] = {real(ULcorner), imag(ULcorner),
+							real(LRcorner), imag(LRcorner)};
+		bool prec_to_low;
+		bool increased_prec = false;
+		do
+		{
+			prec_to_low = false;
+			for (auto lim : limits)
+			{
+				auto lim2 = lim + precision / data_t(4.0);
+				auto test1 = trunc(lim2 / precision * data_t(4.0) + 0.5);
+				auto test2 = trunc(lim / precision * data_t(4.0) + 0.5);
+				if (test1 == test2)
+				{
+					prec_to_low = true;
+					increased_prec = true;
+				}
+			}
+			if (prec_to_low)
+				precision *= 2;
+		} while (prec_to_low == true);
+
+		// Trying to make some room for FP instability.
+		if (increased_prec) precision *= 1024;
+
+		//// At high precisions relative to the data type, floating point
+		//// instability becomes an issue and can cause the number of edges
+		//// to explode. When or if this happens depends on the specific function
+		//// being analyzed. Past the initial refinement of the mesh, if the
+		//// number of edges exceeds edge_limit, the refinement step terminates
+		//// early.
+		//const int edge_limit = 2000;
 
 		// Arbitrary. Later could add a trial-and error mesh sizer which tests
 		// a few values in the desired neighborhood and picks the one which
 		// finds the most candidate regions.
 		if (initial_mesh_len < data_t(0.0))
-			initial_mesh_len = std::min(abs(ULcorner.real() - LRcorner.real())
-				/ data_t(30.0), abs(ULcorner.imag()
-					- LRcorner.imag()) / data_t(30.0));
+			initial_mesh_len = std::min(abs(real(ULcorner) - real(LRcorner))
+				/ data_t(40.0), abs(imag(ULcorner)
+					- imag(LRcorner)) / data_t(40.0));
 		int iterations = (int)ceil(log(data_t(log(2.0))
 			* initial_mesh_len / precision));
 
-		Mesh<cplx>
-			mesh(ULcorner, LRcorner, initial_mesh_len, precision, f);
+		Mesh<cplx> mesh(ULcorner, LRcorner, initial_mesh_len, precision, f, edge_limit);
 
 		for (int i = 0; i < iterations; i++)
 		{
 			mesh.adapt_mesh();
 			mesh.cull_edges();
 			mesh.clear_flags();
-			if (i > 2 && mesh.get_edge_count() > edge_limit)
-				break;
+			//if (i > 2 && mesh.get_edge_count() > edge_limit)
+			//	break;
 		}
 		return mesh.find_zeros_and_poles();
 	}
