@@ -179,6 +179,7 @@ namespace zf
 
 		bool boundary = false;
 		bool is_split = false;
+		bool visited = false;
 	private:
 		Node<cplx>* nodes[2] = {};
 		// Triangles are only needed after adapt_mesh().
@@ -474,7 +475,8 @@ namespace zf
 	template<typename cplx>
 	inline void Mesh<cplx>::complete_quad(Edge<cplx>* e)
 	{
-		auto add_edges = [&](Side side) {
+		int recursion_count = 0;
+		std::function<void(Side)> add_edges = [&](Side side) {
 			int n0 = 0, n1 = 1;
 			int dir_change1 = 1, dir_change2 = 2;
 			if (side == Side::left)
@@ -488,9 +490,13 @@ namespace zf
 			// apply the same process to extend the newest edge if it is one.
 			auto recurse_if_candidate = [&](Edge<cplx>* e)
 			{
-				if (abs(e->get_dq()) == 2)
+				if (recursion_count < 20 && abs(e->get_dq()) == 2
+					&& !e->visited)
 				{
-					complete_quad(e);
+					recursion_count++;
+					e->visited = true;
+					add_edges(Side::right);
+					add_edges(Side::left);
 				}
 			};
 
@@ -874,6 +880,7 @@ namespace zf
 			{
 				e->boundary = false;
 				e->is_split = false;
+				e->visited = false;
 			});
 	}
 
@@ -1039,7 +1046,7 @@ namespace zf
 
 		cplx limits[7] = {ULcorner, LRcorner, avg(ULcorner, LRcorner),
 			avg(ULcorner, LRcorner, 2.0), avg(ULcorner, LRcorner, 1.0, 2.0),
-			avg(ULcorner, LRcorner, 1.234), avg(ULcorner, LRcorner, 3.456)};
+			avg(ULcorner, LRcorner, 1.2345), avg(ULcorner, LRcorner, 3.4567)};
 
 		static const data_t PI = 4 * atan(data_t(1.0));
 		auto gen_key = [&](cplx z)
