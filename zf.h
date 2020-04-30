@@ -178,7 +178,7 @@ namespace zf
 		void calc_dq();
 
 		bool boundary = false;
-		bool is_new = false;
+		bool is_split = false;
 	private:
 		Node<cplx>* nodes[2] = {};
 		// Triangles are only needed after adapt_mesh().
@@ -458,8 +458,8 @@ namespace zf
 			 edge->get_node(1)->location) / data_t(2.0));
 		connect(edge->get_node(1), N, edge->get_dir() + 3);
 		edge->set_node(1, N);
-		edge->is_new = true;
-		edges.back()->is_new = true;
+		edge->is_split = true;
+		edges.back()->is_split = true;
 		return N;
 	}
 
@@ -511,8 +511,15 @@ namespace zf
 					N = e2->get_node(n_0);
 				//auto elen = e->length();
 				//auto e2len = e2->length();
-				if (!e2->is_new)
+
+				// The assumption here is that e2 must either be the same length as e or
+				// it is split, and therefore e2 + its continuation will be the same length
+				// as e.
+				if (!e2->is_split)
 				{
+					//if (N->get_edge(e->get_dir()
+					//	+ neg * dir_change + 3))
+					//	std::cout << "X";
 					connect(e->get_node(n_0), N, e->get_dir()
 						+ neg * dir_change);
 					recurse_if_candidate(edges.back().get());
@@ -535,7 +542,13 @@ namespace zf
 				// appropriately.
 				auto N = insert_node(e->get_node(n0)->location + e->length()
 					* exp(data_t((e->get_dir() + dir_change1 * neg))
-						 * cplx(0, PI) / data_t(3.0)));
+						* cplx(0, PI) / data_t(3.0)));
+				// Alternate calculation. Mathematically equivalent. Is it
+				//slower or faster? Neither? Check later.
+				//auto angle = data_t((e->get_dir() + dir_change1 * neg))
+				//	* PI / data_t(3.0);
+				//auto N = insert_node(e->get_node(n0)->location + e->length()
+				//	* cplx(cos(angle), sin(angle)));
 
 				connect(e->get_node(n0), N, e->get_dir() + neg * dir_change1);
 				recurse_if_candidate(edges.back().get());
@@ -571,8 +584,8 @@ namespace zf
 		auto candidates_end = create_region_triangles();
 
 		// Finds the order for each candidate region by looking at a constituent
-		// triangle, adding up the dqs for each external edge, then recursively
-		// checking each adjacent triangle on the internal edges. The function
+		// triangle, adding up the dqs for each external edge, then checking
+		// each adjacent triangle on the internal edges. The function
 		// estimates the location of a zero/pole by averaging the boundary
 		// points and the order by adding up the dq values for each edge
 		// (4 quadrants = 1 full turn).
@@ -643,13 +656,17 @@ namespace zf
 	inline void Mesh<cplx>::adapt_mesh()
 	{
 		auto candidate_end = candidates_to_front();
-
+		std::vector<Edge<cplx>*> subdivide_queue;
 		auto dist = std::distance(edges.begin(), candidate_end);
 
 		// Splits the candidate edges in half.
 		for (int i = 0; i < dist; i++)
 		{
-			split(edges[i].get());
+			auto e = edges[i].get();
+			split(e);
+			e->boundary = true;
+			e->get_continuation()->boundary = true;
+			subdivide_queue.push_back(e);
 		}
 
 		// Splits all the visited edges in half, and connect the midpoints.
@@ -662,18 +679,11 @@ namespace zf
 		//  \/__\/
 		//   \  /
 		//    \/
-		int recursion_depth;
 		std::function<void(Edge<cplx>*)> subdivide = [&](Edge<cplx>* e) {
-			// Under normal circumstances, recursion_depth shouldn't exceed 2-3.
-			// However, FP instability seems to make it go nuts under some
-			// circumstances, hence the hard cutoff. Chances of this messing up
-			// a legitimate boundary are low but theoretically nonzero.
-			if (recursion_depth > 6) return;
-
 			auto e2 = e->get_continuation();
 			auto split_and_get_end_node = [&](Edge<cplx>* E)
 			{
-				if (!E->is_new)
+				if (!E->is_split)
 				{
 					split(E);
 				}
@@ -699,6 +709,7 @@ namespace zf
 			};
 
 			auto candidate_midpoint = e->get_node(1);
+
 			//     .
 			//    . .
 			//   \   /
@@ -713,9 +724,10 @@ namespace zf
 				if (!candidate_midpoint->get_edge(N.second))
 				{
 					connect(candidate_midpoint, N.first, N.second);
-					edges.back()->is_new = true;
+					edges.back()->is_split = true;
 				}
 			}
+
 			//     .
 			//    . .
 			//   .___.
@@ -728,28 +740,26 @@ namespace zf
 			if (!new_nodes[0].first->get_edge(dir))
 			{
 				connect(new_nodes[0].first, new_nodes[1].first, dir);
-				edges.back()->is_new = true;
+				edges.back()->is_split = true;
 			}
 			if (!new_nodes[3].first->get_edge(dir))
 			{
 				connect(new_nodes[3].first, new_nodes[2].first, dir);
-				edges.back()->is_new = true;
+				edges.back()->is_split = true;
 			}
 			for (auto ne : new_edges)
 			{
 				if (!ne->boundary && abs(ne->get_dq()) == 2)
 				{
-					recursion_depth++;
 					ne->boundary = true;
-					subdivide(ne);
+					subdivide_queue.push_back(ne);
 				}
 			}
 		};
-
-		for (int i = 0; i < dist; i++)
+		int i;
+		for (i = 0; i < subdivide_queue.size(); i++)
 		{
-			recursion_depth = 0;
-			subdivide(edges[i].get());
+			subdivide(subdivide_queue[i]);
 			if (edge_limit > 0 && get_edge_count() > edge_limit)
 				throw std::exception("Edge count exceeded! Specify a higher "
 					"value (uses more memory), reduce "
@@ -779,6 +789,17 @@ namespace zf
 			{
 				e->boundary = true;
 				auto e1 = e->get_next_CW(0);
+				// These checks are failsafes in case adapt_mesh left some
+				// holes. FP instability due to excessive precision is the most
+				// likely culprit when they trigger. At least they ensure the
+				// algorithm can complete. Results should still be pretty good,
+				// Since the result will still be in the neighborhood of the
+				// one the last valid mesh would have produced.
+				if (!e1)
+				{
+					complete_quad(e.get());
+					e1 = e->get_next_CW(0);
+				}
 				Side e1_side;
 				if (e1->get_node(0) == e->get_node(0))
 					e1_side = Side::left;
@@ -787,6 +808,11 @@ namespace zf
 
 				Side e2_side;
 				auto e2 = e->get_next_CCW(1);
+				if (!e2)
+				{
+					complete_quad(e.get());
+					e2 = e->get_next_CCW(1);
+				}
 				if (e2->get_node(1) == e->get_node(1))
 					e2_side = Side::left;
 				else
@@ -794,6 +820,11 @@ namespace zf
 
 				Side e3_side;
 				auto e3 = e->get_next_CW(1);
+				if (!e3)
+				{
+					complete_quad(e.get());
+					e3 = e->get_next_CW(1);
+				}
 				if (e3->get_node(1) == e->get_node(1))
 					e3_side = Side::right;
 				else
@@ -801,6 +832,11 @@ namespace zf
 
 				Side e4_side;
 				auto e4 = e->get_next_CCW(0);
+				if (!e4)
+				{
+					complete_quad(e.get());
+					e4 = e->get_next_CCW(0);
+				}
 				if (e4->get_node(0) == e->get_node(0))
 					e4_side = Side::right;
 				else
@@ -825,7 +861,8 @@ namespace zf
 		{
 			auto e = edges[i].get();
 			if (!(e->get_next_CW(0) && e->get_next_CCW(1) &&
-				e->get_next_CCW(0) && e->get_next_CW(1))) complete_quad(e);
+				e->get_next_CCW(0) && e->get_next_CW(1)))
+				complete_quad(e);
 		};
 	}
 
@@ -836,7 +873,7 @@ namespace zf
 			[](auto&& e)
 			{
 				e->boundary = false;
-				e->is_new = false;
+				e->is_split = false;
 			});
 	}
 
@@ -845,23 +882,23 @@ namespace zf
 	{
 		edges.erase(std::remove_if(edges.begin(), edges.end(), [](auto&& e)
 			{
-				return !e->is_new;
+				return !e->is_split;
 			}), edges.end());
 
 		// Remove unused nodes, i.e. ones with no edges connected.
 		// Keeps memory usage down somewhat.
-		auto itr = nodes.begin();
-		auto end = nodes.end();
-		while (itr != end)
-		{
-			auto n = (*itr).second.get();
-			if (!n->get_edge(0) && !n->get_edge(1)
-				&& !n->get_edge(2) && !n->get_edge(3)
-				&& !n->get_edge(4) && !n->get_edge(5))
-				itr = nodes.erase(itr);
-			else itr++;
-		}
-		nodes.rehash(0);
+		//auto itr = nodes.begin();
+		//auto end = nodes.end();
+		//while (itr != end)
+		//{
+		//	auto n = (*itr).second.get();
+		//	if (!n->get_edge(0) && !n->get_edge(1)
+		//		&& !n->get_edge(2) && !n->get_edge(3)
+		//		&& !n->get_edge(4) && !n->get_edge(5))
+		//		itr = nodes.erase(itr);
+		//	else itr++;
+		//}
+		//nodes.rehash(0);
 	}
 
 	template<typename cplx>
@@ -989,66 +1026,75 @@ namespace zf
 	{
 		typedef typename get_param<cplx>::type data_t;
 
-		//auto range = std::max(abs(real(ULcorner) - real(LRcorner)),
-		//	abs(imag(ULcorner) - imag(LRcorner)));
-
 		// If the specified precision is too fine to actually be usable with
 		// the given data type over the specified range, grow it until it works.
 		// This is very crude but at least it does not depend on any details of
 		// the underlying data type.
 
-		data_t limits[4] = {real(ULcorner), imag(ULcorner),
-							real(LRcorner), imag(LRcorner)};
-		bool prec_to_low;
-		bool increased_prec = false;
-		do
+		auto avg = [](auto pt1, auto pt2,
+			double weight1 = 1.0, double weight2 = 1.0)
 		{
-			prec_to_low = false;
-			for (auto lim : limits)
+			return (pt1 * weight1 + pt2 * weight2) / (weight1 + weight2);
+		};
+
+		cplx limits[7] = {ULcorner, LRcorner, avg(ULcorner, LRcorner),
+			avg(ULcorner, LRcorner, 2.0), avg(ULcorner, LRcorner, 1.0, 2.0),
+			avg(ULcorner, LRcorner, 1.234), avg(ULcorner, LRcorner, 3.456)};
+
+		static const data_t PI = 4 * atan(data_t(1.0));
+		auto gen_key = [&](cplx z)
+		{
+			data_t a = trunc(real(z) / precision * data_t(4.0) + data_t(0.5));
+			data_t b = trunc(imag(z) / precision * data_t(4.0) + data_t(0.5));
+			return cplx(a, b);
+		};
+
+		auto verify_precision = [&]()
+		{
+			auto p_4 = precision / data_t(4.0);
+			data_t height = p_4 * sin(PI / data_t(3.0));
+			for (auto pt : limits)
 			{
-				auto lim2 = lim + precision / data_t(4.0);
-				auto test1 = trunc(lim2 / precision * data_t(4.0) + 0.5);
-				auto test2 = trunc(lim / precision * data_t(4.0) + 0.5);
-				if (test1 == test2)
-				{
-					prec_to_low = true;
-					increased_prec = true;
-				}
+				// First checks that precision is wider than the gap between
+				// values at the corners of the region, plus a few arbitrary
+				// internal points.
+				auto pt2 = pt + p_4;
+				if (gen_key(pt) == gen_key(pt2)) return false;
+
+				// Next checks that generating points on the triangular grid
+				// relative to two other points produces the same rounded value.
+				// More specifically, checks that two vertically aligned points
+				// properly connect to the same "diamond" point between them
+				// on the right side.
+				pt2 = pt + cplx(0, data_t(2.0) * height);
+				auto key1 = gen_key(pt + p_4 * exp(cplx(0, 1)
+					* PI / data_t(3.0)));
+				auto key2 = gen_key(pt2 + p_4 * exp(cplx(0, -1)
+					* PI / data_t(3.0)));
+				if (key1 != key2) return false;
 			}
-			if (prec_to_low)
-				precision *= 2;
-		} while (prec_to_low == true);
+			return true;
+		};
 
-		// Trying to make some room for FP instability.
-		if (increased_prec) precision *= 1024;
+		while (!verify_precision()) precision *= 2;
 
-		//// At high precisions relative to the data type, floating point
-		//// instability becomes an issue and can cause the number of edges
-		//// to explode. When or if this happens depends on the specific function
-		//// being analyzed. Past the initial refinement of the mesh, if the
-		//// number of edges exceeds edge_limit, the refinement step terminates
-		//// early.
-		//const int edge_limit = 2000;
 
-		// Arbitrary. Later could add a trial-and error mesh sizer which tests
-		// a few values in the desired neighborhood and picks the one which
-		// finds the most candidate regions.
+		// 30.0 is arbitrary.
 		if (initial_mesh_len < data_t(0.0))
 			initial_mesh_len = std::min(abs(real(ULcorner) - real(LRcorner))
-				/ data_t(40.0), abs(imag(ULcorner)
-					- imag(LRcorner)) / data_t(40.0));
+				/ data_t(30.0), abs(imag(ULcorner)
+					- imag(LRcorner)) / data_t(30.0));
 		int iterations = (int)ceil(log(data_t(log(2.0))
 			* initial_mesh_len / precision));
 
-		Mesh<cplx> mesh(ULcorner, LRcorner, initial_mesh_len, precision, f, edge_limit);
+		Mesh<cplx> mesh(ULcorner, LRcorner, initial_mesh_len, precision, f,
+			edge_limit);
 
 		for (int i = 0; i < iterations; i++)
 		{
 			mesh.adapt_mesh();
 			mesh.cull_edges();
 			mesh.clear_flags();
-			//if (i > 2 && mesh.get_edge_count() > edge_limit)
-			//	break;
 		}
 		return mesh.find_zeros_and_poles();
 	}
